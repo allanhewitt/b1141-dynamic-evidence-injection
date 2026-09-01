@@ -1,3 +1,13 @@
-# B1141 Dynamic Evidence Injection
+# B1141 Dynamic Evidence Injection — Stage 3 Engine
 
-Repository bootstrap only. Stage 3 engine work is developed and accepted on a separate branch before any merge into `main`.
+Greenfield implementation of the GEDL Dynamic Evidence Injection (DEI) v1 model.
+
+Core behaviour: `initial five-point response -> common new information -> same five-point response -> linked class transition view`.
+
+Learner-facing surfaces deliberately hide internal mechanism vocabulary. Routes are `/#/respond/:activityId`, `/#/control/:activityId`, and `/#/display/:activityId`.
+
+The API withholds configured information objects until the first response is committed; the revised response is unavailable until the review step is completed. Session-scoped SHA-256 participant hashes preserve anonymous linked pre/post traces without persisting raw browser tokens. The engine derives a 5x5 transition matrix and starting-position subgroup summaries.
+
+Production storage is PostgreSQL (`backend/migrations/001_dei_stage3_architecture.sql`, `backend/storage/postgres-store.mjs`). The two B1141 validation activities are inactive by default so Stage 3 acceptance cannot silently become Stage 4 configuration.
+
+Stage 3 was accepted using a production-equivalent GitHub Actions environment with PostgreSQL 16. Push run `33530827653` passed both the general checks and PostgreSQL-integrated acceptance on the pre-closure implementation head. Pull request #1 is deliberately left unmerged; `main` remains the bootstrap/cutover boundary until a later deployment decision.
