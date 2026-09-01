@@ -1,0 +1,56 @@
+name: DEI Stage 3 acceptance
+
+on:
+  push:
+    branches: [stage3-dei-integrated-acceptance]
+  pull_request:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --include=optional
+      - run: npm run check
+      - run: npm test
+      - run: npm audit --omit=dev
+
+  postgres-integrated-acceptance:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: dei
+          POSTGRES_USER: dei
+          POSTGRES_PASSWORD: acceptance-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dei -d dei"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      STORAGE: postgres
+      DATABASE_URL: postgres://dei:acceptance-only@127.0.0.1:5432/dei
+      DEI_LECTURER_KEY: acceptance-key
+      DEI_PARTICIPANT_SALT: acceptance-salt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --include=optional
+      - name: Apply real PostgreSQL schema and seed inactive validation activities
+        run: node backend/init-postgres.mjs
+      - name: Verify production fixtures remain inactive after migration
+        run: |
+          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -c "SELECT id, active FROM activities ORDER BY id;" | tee /tmp/activities.txt
+          test "$(grep -c ' f$' /tmp/activities.txt)" -eq 2
+      - name: Run PostgreSQL full-stack acceptance
+        run: node --test tests/postgres-http-acceptance.test.mjs
