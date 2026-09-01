@@ -10,4 +10,4 @@ The API withholds configured information objects until the first response is com
 
 Production storage is PostgreSQL (`backend/migrations/001_dei_stage3_architecture.sql`, `backend/storage/postgres-store.mjs`). The two B1141 validation activities are inactive by default so Stage 3 acceptance cannot silently become Stage 4 configuration.
 
-The branch `stage3-dei-integrated-acceptance` is the Stage 3 acceptance line. `main` remains a bootstrap-only deployment boundary until a later deliberate cutover.
+Stage 3 was accepted using a production-equivalent GitHub Actions environment with PostgreSQL 16. Push run `33530827653` passed both the general checks and PostgreSQL-integrated acceptance on the pre-closure implementation head. Pull request #1 is deliberately left unmerged; `main` remains the bootstrap/cutover boundary until a later deployment decision.
