@@ -52,11 +52,30 @@ jobs:
         with:
           node-version: 22
       - run: npm install --include=optional
-      - name: Apply real PostgreSQL schema and seed inactive activities
-        run: node backend/init-postgres.mjs
-      - name: Verify configured fixtures remain inactive after migration
+      - name: Apply accepted Stage 3 PostgreSQL schema
+        run: PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -f backend/migrations/001_dei_stage3_architecture.sql
+      - name: Simulate retained inactive Stage 3 validation row
         run: |
-          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -c "SELECT id, active FROM activities ORDER BY id;" | tee /tmp/activities.txt
-          test "$(grep -c ' f$' /tmp/activities.txt)" -eq 2
+          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO activities (id,title,model,schema_version,active,config)
+          VALUES ('b1141-w9-disclosure-sequence-dei','The Disclosure Sequence','dei',1,false,'{}'::jsonb);
+          SQL
+      - name: Apply guarded Stage 4 B1141 configuration
+        run: PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -f backend/migrations/002_dei_stage4_b1141_configuration.sql
+      - name: Verify canonical configuration and validation-row retention
+        run: |
+          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -At <<'SQL' > /tmp/dei-stage4.txt
+          SELECT 'canonical_count=' || COUNT(*) FROM activities WHERE id IN ('b1141-w2-who-dopes-dei','b1141-w8-disclosure-sequence-dei') AND model='dei';
+          SELECT 'canonical_active=' || COUNT(*) FROM activities WHERE id IN ('b1141-w2-who-dopes-dei','b1141-w8-disclosure-sequence-dei') AND model='dei' AND active;
+          SELECT 'old_validation_inactive=' || COUNT(*) FROM activities WHERE id='b1141-w9-disclosure-sequence-dei' AND model='dei' AND active=false;
+          SELECT 'dei02_title=' || title FROM activities WHERE id='b1141-w8-disclosure-sequence-dei';
+          SELECT 'dei01_heading=' || config->'results'->>'heading' FROM activities WHERE id='b1141-w2-who-dopes-dei';
+          SQL
+          cat /tmp/dei-stage4.txt
+          grep -qx 'canonical_count=2' /tmp/dei-stage4.txt
+          grep -qx 'canonical_active=0' /tmp/dei-stage4.txt
+          grep -qx 'old_validation_inactive=1' /tmp/dei-stage4.txt
+          grep -qx 'dei02_title=A Club Responds' /tmp/dei-stage4.txt
+          grep -qx 'dei01_heading=What changed — if anything?' /tmp/dei-stage4.txt
       - name: Run PostgreSQL full-stack acceptance
         run: node --test tests/postgres-http-acceptance.test.mjs
