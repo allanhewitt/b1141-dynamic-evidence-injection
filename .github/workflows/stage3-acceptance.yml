@@ -1,10 +1,16 @@
-name: DEI Stage 3 acceptance
+name: DEI acceptance
 
 on:
   push:
-    branches: [stage3-dei-integrated-acceptance]
+    branches:
+      - stage3-dei-integrated-acceptance
+      - stage3-dei-public-alias-routing-fix
+      - stage4-dei-instance-configuration
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - stage3-dei-integrated-acceptance
+      - stage3-dei-public-alias-routing-fix
 
 jobs:
   checks:
@@ -46,9 +52,9 @@ jobs:
         with:
           node-version: 22
       - run: npm install --include=optional
-      - name: Apply real PostgreSQL schema and seed inactive validation activities
+      - name: Apply real PostgreSQL schema and seed inactive activities
         run: node backend/init-postgres.mjs
-      - name: Verify production fixtures remain inactive after migration
+      - name: Verify configured fixtures remain inactive after migration
         run: |
           PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -c "SELECT id, active FROM activities ORDER BY id;" | tee /tmp/activities.txt
           test "$(grep -c ' f$' /tmp/activities.txt)" -eq 2
