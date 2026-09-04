@@ -39,7 +39,9 @@ jobs:
         run: npm install --include=optional
       - name: Check source syntax
         run: npm run check
-      - name: Run complete test suite
+      - name: Run complete non-PostgreSQL test suite
+        env:
+          STORAGE: sqlite
         run: npm test
       - name: Audit production dependencies
         run: |
