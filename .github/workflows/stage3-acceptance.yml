@@ -69,7 +69,7 @@ jobs:
           SELECT 'canonical_active=' || COUNT(*) FROM activities WHERE id IN ('b1141-w2-who-dopes-dei','b1141-w8-disclosure-sequence-dei') AND model='dei' AND active;
           SELECT 'old_validation_inactive=' || COUNT(*) FROM activities WHERE id='b1141-w9-disclosure-sequence-dei' AND model='dei' AND active=false;
           SELECT 'dei02_title=' || title FROM activities WHERE id='b1141-w8-disclosure-sequence-dei';
-          SELECT 'dei01_heading=' || config->'results'->>'heading' FROM activities WHERE id='b1141-w2-who-dopes-dei';
+          SELECT 'dei01_heading=' || (config->'results'->>'heading') FROM activities WHERE id='b1141-w2-who-dopes-dei';
           SQL
           cat /tmp/dei-stage4.txt
           grep -qx 'canonical_count=2' /tmp/dei-stage4.txt
