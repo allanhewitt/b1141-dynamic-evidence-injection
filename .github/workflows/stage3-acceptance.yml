@@ -23,7 +23,17 @@ jobs:
       - run: npm install --include=optional
       - run: npm run check
       - run: npm test
-      - run: npm audit --omit=dev
+      - name: Audit production dependencies
+        run: |
+          for attempt in 1 2 3; do
+            if npm audit --omit=dev; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            sleep 10
+          done
 
   postgres-integrated-acceptance:
     runs-on: ubuntu-latest
