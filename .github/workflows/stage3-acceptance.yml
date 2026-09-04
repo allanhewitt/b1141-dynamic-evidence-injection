@@ -1,25 +1,15 @@
-name: DEI Stage 3 acceptance
+name: DEI Stage 4 acceptance
 
 on:
   push:
-    branches: [stage3-dei-integrated-acceptance]
+    branches:
+      - stage4-dei-instance-configuration
   pull_request:
-    branches: [main]
+    branches:
+      - stage3-dei-public-alias-routing-fix
 
 jobs:
-  checks:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm install --include=optional
-      - run: npm run check
-      - run: npm test
-      - run: npm audit --omit=dev
-
-  postgres-integrated-acceptance:
+  stage4-acceptance:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -45,12 +35,67 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install --include=optional
-      - name: Apply real PostgreSQL schema and seed inactive validation activities
-        run: node backend/init-postgres.mjs
-      - name: Verify production fixtures remain inactive after migration
+      - name: Install production and acceptance dependencies
+        run: npm install --include=optional --no-audit --no-fund
+      - name: Check source syntax
+        run: npm run check
+      - name: Run complete non-PostgreSQL test suite
+        env:
+          STORAGE: sqlite
+        run: npm test
+      - name: Audit production dependencies
         run: |
-          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -c "SELECT id, active FROM activities ORDER BY id;" | tee /tmp/activities.txt
-          test "$(grep -c ' f$' /tmp/activities.txt)" -eq 2
+          service_failure=0
+          for attempt in 1 2 3; do
+            set +e
+            timeout 45s npm audit --omit=dev --json > /tmp/dei-npm-audit.json 2> /tmp/dei-npm-audit.err
+            rc=$?
+            set -e
+            cat /tmp/dei-npm-audit.json || true
+            cat /tmp/dei-npm-audit.err >&2 || true
+            if [ "$rc" -eq 0 ]; then
+              exit 0
+            fi
+            if [ "$rc" -eq 124 ] || grep -q '"error"' /tmp/dei-npm-audit.json || grep -qiE 'service unavailable|network|timeout|timed out|ECONN|EAI_AGAIN' /tmp/dei-npm-audit.err; then
+              service_failure=1
+              if [ "$attempt" -lt 3 ]; then
+                sleep 5
+                continue
+              fi
+              break
+            fi
+            echo 'npm audit returned a substantive failure; acceptance stops.' >&2
+            exit "$rc"
+          done
+          if [ "$service_failure" -eq 1 ]; then
+            echo '::warning::npm audit service unavailable after bounded retries. Stage 4 introduces no production dependency change; dependency-service availability is not treated as an application defect.'
+            exit 0
+          fi
+          exit 1
+      - name: Apply accepted Stage 3 PostgreSQL schema
+        run: PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -f backend/migrations/001_dei_stage3_architecture.sql
+      - name: Simulate retained inactive Stage 3 validation row
+        run: |
+          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO activities (id,title,model,schema_version,active,config)
+          VALUES ('b1141-w9-disclosure-sequence-dei','The Disclosure Sequence','dei',1,false,'{}'::jsonb);
+          SQL
+      - name: Apply guarded Stage 4 B1141 configuration
+        run: PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -f backend/migrations/002_dei_stage4_b1141_configuration.sql
+      - name: Verify canonical configuration and validation-row retention
+        run: |
+          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -At <<'SQL' > /tmp/dei-stage4.txt
+          SELECT 'canonical_count=' || COUNT(*) FROM activities WHERE id IN ('b1141-w2-who-dopes-dei','b1141-w8-disclosure-sequence-dei') AND model='dei';
+          SELECT 'canonical_active=' || COUNT(*) FROM activities WHERE id IN ('b1141-w2-who-dopes-dei','b1141-w8-disclosure-sequence-dei') AND model='dei' AND active;
+          SELECT 'old_validation_inactive=' || COUNT(*) FROM activities WHERE id='b1141-w9-disclosure-sequence-dei' AND model='dei' AND active=false;
+          SELECT 'dei02_title=' || title FROM activities WHERE id='b1141-w8-disclosure-sequence-dei';
+          SELECT 'dei01_heading=' || (config->'results'->>'heading') FROM activities WHERE id='b1141-w2-who-dopes-dei';
+          SQL
+          cat /tmp/dei-stage4.txt
+          grep -qx 'canonical_count=2' /tmp/dei-stage4.txt
+          grep -qx 'canonical_active=0' /tmp/dei-stage4.txt
+          grep -qx 'old_validation_inactive=1' /tmp/dei-stage4.txt
+          grep -qx 'dei02_title=A Club Responds' /tmp/dei-stage4.txt
+          grep -qx 'dei01_heading=What changed — if anything?' /tmp/dei-stage4.txt
       - name: Run PostgreSQL full-stack acceptance
         run: node --test tests/postgres-http-acceptance.test.mjs
