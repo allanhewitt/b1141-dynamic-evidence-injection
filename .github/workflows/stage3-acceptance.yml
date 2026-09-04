@@ -1,41 +1,15 @@
-name: DEI acceptance
+name: DEI Stage 4 acceptance
 
 on:
   push:
     branches:
-      - stage3-dei-integrated-acceptance
-      - stage3-dei-public-alias-routing-fix
       - stage4-dei-instance-configuration
   pull_request:
     branches:
-      - main
-      - stage3-dei-integrated-acceptance
       - stage3-dei-public-alias-routing-fix
 
 jobs:
-  checks:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm install --include=optional
-      - run: npm run check
-      - run: npm test
-      - name: Audit production dependencies
-        run: |
-          for attempt in 1 2 3; do
-            if npm audit --omit=dev; then
-              exit 0
-            fi
-            if [ "$attempt" -eq 3 ]; then
-              exit 1
-            fi
-            sleep 10
-          done
-
-  postgres-integrated-acceptance:
+  stage4-acceptance:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -61,7 +35,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install --include=optional
+      - name: Install production and acceptance dependencies
+        run: npm install --include=optional
+      - name: Check source syntax
+        run: npm run check
+      - name: Run complete test suite
+        run: npm test
+      - name: Audit production dependencies
+        run: |
+          for attempt in 1 2 3; do
+            if npm audit --omit=dev; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            sleep 10
+          done
       - name: Apply accepted Stage 3 PostgreSQL schema
         run: PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -f backend/migrations/001_dei_stage3_architecture.sql
       - name: Simulate retained inactive Stage 3 validation row
