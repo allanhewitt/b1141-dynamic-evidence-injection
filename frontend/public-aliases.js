@@ -1,6 +1,6 @@
 export const PUBLIC_ALIASES = Object.freeze({
   dei01: 'b1141-w2-who-dopes-dei',
-  dei02: 'b1141-w9-disclosure-sequence-dei'
+  dei02: 'b1141-w8-disclosure-sequence-dei'
 });
 
 export function resolvePublicAlias(pathname) {
