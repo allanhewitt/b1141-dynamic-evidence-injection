@@ -7,7 +7,7 @@ import { createServer } from '../backend/server.mjs';
 
 test('DEI public aliases resolve without exposing route actions or canonical IDs', () => {
   assert.deepEqual(resolvePublicAlias('/dei01'), { alias: 'dei01', activityId: 'b1141-w2-who-dopes-dei' });
-  assert.deepEqual(resolvePublicAlias('/dei02'), { alias: 'dei02', activityId: 'b1141-w9-disclosure-sequence-dei' });
+  assert.deepEqual(resolvePublicAlias('/dei02'), { alias: 'dei02', activityId: 'b1141-w8-disclosure-sequence-dei' });
   assert.equal(resolvePublicAlias('/respond/b1141-w2-who-dopes-dei'), null);
   assert.equal(resolvePublicAlias('/dei03'), null);
   for (const alias of Object.keys(PUBLIC_ALIASES)) {
