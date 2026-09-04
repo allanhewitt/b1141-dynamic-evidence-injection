@@ -36,7 +36,7 @@ jobs:
         with:
           node-version: 22
       - name: Install production and acceptance dependencies
-        run: npm install --include=optional
+        run: npm install --include=optional --no-audit --no-fund
       - name: Check source syntax
         run: npm run check
       - name: Run complete non-PostgreSQL test suite
@@ -46,7 +46,7 @@ jobs:
       - name: Audit production dependencies
         run: |
           for attempt in 1 2 3; do
-            if npm audit --omit=dev; then
+            if npm_config_fetch_timeout=30000 npm_config_fetch_retries=0 npm audit --omit=dev; then
               exit 0
             fi
             if [ "$attempt" -eq 3 ]; then
