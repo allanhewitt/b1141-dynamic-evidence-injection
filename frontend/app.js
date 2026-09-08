@@ -5,7 +5,27 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const api=async(url,opts={})=>{const r=await fetch(url,{headers:{'content-type':'application/json',...(opts.headers||{})},...opts});const b=await r.json();if(!r.ok)throw new Error(b.error||'Request failed');return b};
 const page=(html,mode='')=>{document.body.className=mode;app.innerHTML=`<div class="shell">${html}</div>`};
 const route=()=>{const[p,q='']=location.hash.slice(2).split('?');return{parts:p.split('/').filter(Boolean),params:new URLSearchParams(q)}};
-const token=()=>{let t=sessionStorage.getItem('dei-token');if(!t){t=crypto.randomUUID();sessionStorage.setItem('dei-token',t)}return t};
+let memoryToken=null;
+const makeToken=()=>{
+  const c=globalThis.crypto;
+  if(c?.randomUUID)return c.randomUUID();
+  if(c?.getRandomValues){
+    const bytes=new Uint8Array(16);c.getRandomValues(bytes);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+    const h=[...bytes].map(x=>x.toString(16).padStart(2,'0')).join('');
+    return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+};
+const token=()=>{
+  try{
+    let t=sessionStorage.getItem('dei-token');
+    if(!t){t=makeToken();sessionStorage.setItem('dei-token',t)}
+    return t;
+  }catch{
+    if(!memoryToken)memoryToken=makeToken();
+    return memoryToken;
+  }
+};
 const scale=(labels,selected)=>`<div class="scale">${labels.map((l,i)=>`<button data-v="${i+1}" class="${selected===i+1?'selected':''}">${esc(l)}</button>`).join('')}</div>`;
 
 async function resolveSession(activity,id){if(id)return id;const d=await api(`/api/dei/activities/${encodeURIComponent(activity)}/open-session`);if(!d.session_id)throw new Error('This activity is not open yet.');return d.session_id}
@@ -51,5 +71,17 @@ async function lecturer(activityId,params){
 
 async function presentation(activityId,params){const sessionId=await resolveSession(activityId,params.get('session'));const refresh=async()=>{const d=await api(`/api/dei/sessions/${sessionId}/presentation`);page(`<div class="eyebrow">Class overview</div><div class="prompt">${esc(d.prompt)}</div>${d.results.total?`<h1>${esc(d.results_copy.heading)}</h1>${flow(d.results.matrix,d.scale_labels)}<div class="stats"><div class="stat"><strong>${d.results.percentages.lower}%</strong><br>Moved lower</div><div class="stat"><strong>${d.results.percentages.unchanged}%</strong><br>Unchanged</div><div class="stat"><strong>${d.results.percentages.higher}%</strong><br>Moved higher</div></div>`:`<div class="panel"><span class="big">${d.counts.revised}</span><br>Revised responses received</div>`}<button id="refresh" class="button">Refresh</button>`,'presentation');document.querySelector('#refresh').onclick=refresh};await refresh()}
 
-async function main(){try{const publicRoute=resolvePublicAlias(location.pathname);if(publicRoute)return student(publicRoute.activityId,new URLSearchParams(location.search));const{parts,params}=route();if(parts[0]==='respond'&&parts[1])return student(parts[1],params);if(parts[0]==='control'&&parts[1])return lecturer(parts[1],params);if(parts[0]==='display'&&parts[1])return presentation(parts[1],params);page(`<div class="eyebrow">DEI Engine</div><h1>Choose a configured activity surface</h1>`)}catch(e){page(`<h1>Something went wrong</h1><p>${esc(e.message)}</p>`)}}
-window.addEventListener('hashchange',main);main();
+async function main(){
+  try{
+    const publicRoute=resolvePublicAlias(location.pathname);
+    if(publicRoute){await student(publicRoute.activityId,new URLSearchParams(location.search));return}
+    const{parts,params}=route();
+    if(parts[0]==='respond'&&parts[1]){await student(parts[1],params);return}
+    if(parts[0]==='control'&&parts[1]){await lecturer(parts[1],params);return}
+    if(parts[0]==='display'&&parts[1]){await presentation(parts[1],params);return}
+    page(`<div class="eyebrow">DEI Engine</div><h1>Choose a configured activity surface</h1>`)
+  }catch(e){
+    page(`<h1>Something went wrong</h1><p>${esc(e?.message||'This activity could not be opened on this browser.')}</p>`)
+  }
+}
+window.addEventListener('hashchange',()=>{void main()});void main();
