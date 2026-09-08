@@ -103,9 +103,9 @@ jobs:
         run: node --test tests/postgres-http-acceptance.test.mjs
       - name: Restore safe release-candidate state
         run: |
-          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -c "UPDATE activities SET active=false WHERE model='dei'; UPDATE sessions SET status='closed' WHERE status='open';"
+          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -c "UPDATE activities SET active=false WHERE model='dei'; UPDATE activity_sessions SET status='closed', closed_at=COALESCE(closed_at, now()) WHERE status='open';"
       - name: Verify final safe state
         run: |
-          state=$(PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -At -c "SELECT COUNT(*) FILTER (WHERE active) || ':' || (SELECT COUNT(*) FROM sessions WHERE status='open') FROM activities WHERE model='dei';")
+          state=$(PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -At -c "SELECT COUNT(*) FILTER (WHERE active) || ':' || (SELECT COUNT(*) FROM activity_sessions WHERE status='open') FROM activities WHERE model='dei';")
           echo "final_state=$state"
           test "$state" = "0:0"
