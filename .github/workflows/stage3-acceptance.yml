@@ -1,15 +1,15 @@
-name: DEI Stage 4 acceptance
+name: DEI Stage 5 release-candidate acceptance
 
 on:
   push:
     branches:
-      - stage4-dei-instance-configuration
+      - stage5-dei-deploy-pre-live
   pull_request:
     branches:
-      - stage3-dei-public-alias-routing-fix
+      - main
 
 jobs:
-  stage4-acceptance:
+  stage5-release-candidate:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -30,6 +30,7 @@ jobs:
       DATABASE_URL: postgres://dei:acceptance-only@127.0.0.1:5432/dei
       DEI_LECTURER_KEY: acceptance-key
       DEI_PARTICIPANT_SALT: acceptance-salt
+      DEI_FIXTURES: backend/fixtures/production-empty.json
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -68,34 +69,42 @@ jobs:
             exit "$rc"
           done
           if [ "$service_failure" -eq 1 ]; then
-            echo '::warning::npm audit service unavailable after bounded retries. Stage 4 introduces no production dependency change; dependency-service availability is not treated as an application defect.'
+            echo '::warning::npm audit service unavailable after bounded retries. Dependency-service availability is not treated as an application defect.'
             exit 0
           fi
           exit 1
-      - name: Apply accepted Stage 3 PostgreSQL schema
-        run: PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -f backend/migrations/001_dei_stage3_architecture.sql
-      - name: Simulate retained inactive Stage 3 validation row
+      - name: Initialise production PostgreSQL from accepted Stage 4 baseline
+        run: npm run init:production-postgres
+      - name: Verify first-deploy canonical state
         run: |
-          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 <<'SQL'
-          INSERT INTO activities (id,title,model,schema_version,active,config)
-          VALUES ('b1141-w9-disclosure-sequence-dei','The Disclosure Sequence','dei',1,false,'{}'::jsonb);
-          SQL
-      - name: Apply guarded Stage 4 B1141 configuration
-        run: PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -f backend/migrations/002_dei_stage4_b1141_configuration.sql
-      - name: Verify canonical configuration and validation-row retention
-        run: |
-          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -At <<'SQL' > /tmp/dei-stage4.txt
+          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -At <<'SQL' > /tmp/dei-first-deploy.txt
           SELECT 'canonical_count=' || COUNT(*) FROM activities WHERE id IN ('b1141-w2-who-dopes-dei','b1141-w8-disclosure-sequence-dei') AND model='dei';
           SELECT 'canonical_active=' || COUNT(*) FROM activities WHERE id IN ('b1141-w2-who-dopes-dei','b1141-w8-disclosure-sequence-dei') AND model='dei' AND active;
-          SELECT 'old_validation_inactive=' || COUNT(*) FROM activities WHERE id='b1141-w9-disclosure-sequence-dei' AND model='dei' AND active=false;
+          SELECT 'dei01_title=' || title FROM activities WHERE id='b1141-w2-who-dopes-dei';
           SELECT 'dei02_title=' || title FROM activities WHERE id='b1141-w8-disclosure-sequence-dei';
-          SELECT 'dei01_heading=' || (config->'results'->>'heading') FROM activities WHERE id='b1141-w2-who-dopes-dei';
           SQL
-          cat /tmp/dei-stage4.txt
-          grep -qx 'canonical_count=2' /tmp/dei-stage4.txt
-          grep -qx 'canonical_active=0' /tmp/dei-stage4.txt
-          grep -qx 'old_validation_inactive=1' /tmp/dei-stage4.txt
-          grep -qx 'dei02_title=A Club Responds' /tmp/dei-stage4.txt
-          grep -qx 'dei01_heading=What changed — if anything?' /tmp/dei-stage4.txt
+          cat /tmp/dei-first-deploy.txt
+          grep -qx 'canonical_count=2' /tmp/dei-first-deploy.txt
+          grep -qx 'canonical_active=0' /tmp/dei-first-deploy.txt
+          grep -qx 'dei01_title=Who Dopes?' /tmp/dei-first-deploy.txt
+          grep -qx 'dei02_title=A Club Responds' /tmp/dei-first-deploy.txt
+      - name: Prove activation survives production reinitialisation
+        run: |
+          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -c "UPDATE activities SET active=true WHERE id='b1141-w2-who-dopes-dei';"
+          npm run init:production-postgres
+          value=$(PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -At -c "SELECT active FROM activities WHERE id='b1141-w2-who-dopes-dei';")
+          test "$value" = "t"
+          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -c "UPDATE activities SET active=false WHERE id='b1141-w2-who-dopes-dei';"
       - name: Run PostgreSQL full-stack acceptance
+        env:
+          DEI_FIXTURES: backend/fixtures/activities.json
+          DEI_SEED_ACTIVE: "1"
         run: node --test tests/postgres-http-acceptance.test.mjs
+      - name: Restore safe release-candidate state
+        run: |
+          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -c "UPDATE activities SET active=false WHERE model='dei'; UPDATE sessions SET status='closed' WHERE status='open';"
+      - name: Verify final safe state
+        run: |
+          state=$(PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -At -c "SELECT COUNT(*) FILTER (WHERE active) || ':' || (SELECT COUNT(*) FROM sessions WHERE status='open') FROM activities WHERE model='dei';")
+          echo "final_state=$state"
+          test "$state" = "0:0"
