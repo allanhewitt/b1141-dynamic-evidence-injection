@@ -43,6 +43,7 @@ jobs:
       - name: Run complete non-PostgreSQL test suite
         env:
           STORAGE: sqlite
+          DEI_FIXTURES: backend/fixtures/activities.json
         run: npm test
       - name: Audit production dependencies
         run: |
