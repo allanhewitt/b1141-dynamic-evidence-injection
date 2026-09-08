@@ -1,0 +1,111 @@
+name: DEI Stage 5 release-candidate acceptance
+
+on:
+  push:
+    branches:
+      - stage5-dei-deploy-pre-live
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  stage5-release-candidate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: dei
+          POSTGRES_USER: dei
+          POSTGRES_PASSWORD: acceptance-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dei -d dei"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      STORAGE: postgres
+      DATABASE_URL: postgres://dei:acceptance-only@127.0.0.1:5432/dei
+      DEI_LECTURER_KEY: acceptance-key
+      DEI_PARTICIPANT_SALT: acceptance-salt
+      DEI_FIXTURES: backend/fixtures/production-empty.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install production and acceptance dependencies
+        run: npm install --include=optional --no-audit --no-fund
+      - name: Check source syntax
+        run: npm run check
+      - name: Run complete non-PostgreSQL test suite
+        env:
+          STORAGE: sqlite
+          DEI_FIXTURES: backend/fixtures/activities.json
+        run: npm test
+      - name: Audit production dependencies
+        run: |
+          service_failure=0
+          for attempt in 1 2 3; do
+            set +e
+            timeout 45s npm audit --omit=dev --json > /tmp/dei-npm-audit.json 2> /tmp/dei-npm-audit.err
+            rc=$?
+            set -e
+            cat /tmp/dei-npm-audit.json || true
+            cat /tmp/dei-npm-audit.err >&2 || true
+            if [ "$rc" -eq 0 ]; then
+              exit 0
+            fi
+            if [ "$rc" -eq 124 ] || grep -q '"error"' /tmp/dei-npm-audit.json || grep -qiE 'service unavailable|network|timeout|timed out|ECONN|EAI_AGAIN' /tmp/dei-npm-audit.err; then
+              service_failure=1
+              if [ "$attempt" -lt 3 ]; then
+                sleep 5
+                continue
+              fi
+              break
+            fi
+            echo 'npm audit returned a substantive failure; acceptance stops.' >&2
+            exit "$rc"
+          done
+          if [ "$service_failure" -eq 1 ]; then
+            echo '::warning::npm audit service unavailable after bounded retries. Dependency-service availability is not treated as an application defect.'
+            exit 0
+          fi
+          exit 1
+      - name: Initialise production PostgreSQL from accepted Stage 4 baseline
+        run: npm run init:production-postgres
+      - name: Verify first-deploy canonical state
+        run: |
+          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -At <<'SQL' > /tmp/dei-first-deploy.txt
+          SELECT 'canonical_count=' || COUNT(*) FROM activities WHERE id IN ('b1141-w2-who-dopes-dei','b1141-w8-disclosure-sequence-dei') AND model='dei';
+          SELECT 'canonical_active=' || COUNT(*) FROM activities WHERE id IN ('b1141-w2-who-dopes-dei','b1141-w8-disclosure-sequence-dei') AND model='dei' AND active;
+          SELECT 'dei01_title=' || title FROM activities WHERE id='b1141-w2-who-dopes-dei';
+          SELECT 'dei02_title=' || title FROM activities WHERE id='b1141-w8-disclosure-sequence-dei';
+          SQL
+          cat /tmp/dei-first-deploy.txt
+          grep -qx 'canonical_count=2' /tmp/dei-first-deploy.txt
+          grep -qx 'canonical_active=0' /tmp/dei-first-deploy.txt
+          grep -qx 'dei01_title=Who Dopes?' /tmp/dei-first-deploy.txt
+          grep -qx 'dei02_title=A Club Responds' /tmp/dei-first-deploy.txt
+      - name: Prove activation survives production reinitialisation
+        run: |
+          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -c "UPDATE activities SET active=true WHERE id='b1141-w2-who-dopes-dei';"
+          npm run init:production-postgres
+          value=$(PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -At -c "SELECT active FROM activities WHERE id='b1141-w2-who-dopes-dei';")
+          test "$value" = "t"
+          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -c "UPDATE activities SET active=false WHERE id='b1141-w2-who-dopes-dei';"
+      - name: Run PostgreSQL full-stack acceptance
+        env:
+          DEI_FIXTURES: backend/fixtures/activities.json
+          DEI_SEED_ACTIVE: "1"
+        run: node --test tests/postgres-http-acceptance.test.mjs
+      - name: Restore safe release-candidate state
+        run: |
+          PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -v ON_ERROR_STOP=1 -c "UPDATE activities SET active=false WHERE model='dei'; UPDATE activity_sessions SET status='closed', closed_at=COALESCE(closed_at, now()) WHERE status='open';"
+      - name: Verify final safe state
+        run: |
+          state=$(PGPASSWORD=acceptance-only psql -h 127.0.0.1 -U dei -d dei -At -c "SELECT COUNT(*) FILTER (WHERE active) || ':' || (SELECT COUNT(*) FROM activity_sessions WHERE status='open') FROM activities WHERE model='dei';")
+          echo "final_state=$state"
+          test "$state" = "0:0"

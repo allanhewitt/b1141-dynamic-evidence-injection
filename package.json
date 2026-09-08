@@ -1,0 +1,17 @@
+{
+  "name": "b1141-dynamic-evidence-injection",
+  "version": "0.1.0-stage5-rc",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node backend/production-server.mjs",
+    "start:engine": "node backend/server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check backend/server.mjs && node --check backend/production-server.mjs && node --check backend/init-production-postgres.mjs && node --check backend/lib/dei-domain.mjs && node --check backend/storage/sqlite-store.mjs && node --check backend/storage/postgres-store.mjs && node --check frontend/app.js && node --check backend/init-stage4-postgres.mjs",
+    "init:stage4-postgres": "node backend/init-stage4-postgres.mjs",
+    "init:production-postgres": "node backend/init-production-postgres.mjs"
+  },
+  "optionalDependencies": {
+    "pg": "^8.16.3"
+  }
+}
