@@ -6,9 +6,11 @@ const source = fs.readFileSync(new URL('../frontend/app.js', import.meta.url), '
 
 test('lecturer view derives its visible title from configured activity metadata', () => {
   const lecturerStart = source.indexOf('async function lecturer');
+  const presentationStart = source.indexOf('async function presentation');
   assert.notEqual(lecturerStart, -1, 'lecturer surface must exist');
-  const lecturerSource = source.slice(lecturerStart, lecturerStart + 3000);
+  assert.ok(presentationStart > lecturerStart, 'presentation surface must follow lecturer surface');
+  const lecturerSource = source.slice(lecturerStart, presentationStart);
   assert.match(lecturerSource, /\/presentation`\)/);
-  assert.match(lecturerSource, /meta\.title\|\|activityId/);
+  assert.match(lecturerSource, /meta\.title \|\| activityId/);
   assert.doesNotMatch(lecturerSource, /<h1>\$\{esc\(activityId\)\}<\/h1>/);
 });
